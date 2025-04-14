@@ -23,8 +23,8 @@ A Python implementation of reinforcement learning algorithms (SARSA and Q-Learni
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/single-agent-rl.git
-cd single-agent-rl
+git clone https://github.com/elderaka/Single-Agent-Reinforcement-Learning.git
+cd Single-Agent-Reinforcement-Learning
 ```
 
 2. Install dependencies:
