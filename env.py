@@ -6,9 +6,9 @@ import os
 
 class GridWorld:
     """
-    A Frozen Lake-like environment for reinforcement learning.
-    The agent must navigate from start to goal while avoiding holes.
-    The environment has stochastic transitions (slippery ice).
+    Frozen Lake environment for reinforcement learning.
+    Agent must navigate from start to goal while avoiding holes.
+    Environment has stochastic transitions (slippery ice).
     """
     
     # Tile types
@@ -21,18 +21,33 @@ class GridWorld:
                  goal_pos: List[Tuple[int, int]] = None, holes: List[Tuple[int, int]] = None,
                  is_slippery: bool = True):
         """
-        Initialize the Frozen Lake environment.
+        Initialize Frozen Lake environment.
         
         Args:
-            size: Size of the grid (size x size)
-            start_pos: Starting position (row, col)
-            goal_pos: List of goal positions. If None, defaults to bottom-right corner
-            holes: List of hole positions. If None, randomly generates holes
-            is_slippery: Whether the environment has stochastic transitions
+            size: Grid size (size x size)
+            start_pos: Starting position (row, col). If None, defaults to (0, 0)
+            goal_pos: List of goal positions. If None or empty, defaults to bottom-right corner
+            holes: List of hole positions. If None or empty, generates random holes
+            is_slippery: Whether environment has stochastic transitions
         """
+        # Validate grid size
+        if size < 2:
+            raise ValueError("Grid size must be at least 2x2")
         self.size = size
+        
+        # Set default start position if None
+        if start_pos is None:
+            start_pos = (0, 0)
+        self._validate_position(start_pos, "start position")
         self.start_pos = start_pos
-        self.goal_pos = goal_pos if goal_pos else [(size-1, size-1)]
+        
+        # Set default goal position if None or empty
+        if goal_pos is None or not goal_pos:
+            goal_pos = [(size-1, size-1)]
+        for pos in goal_pos:
+            self._validate_position(pos, "goal position")
+        self.goal_pos = goal_pos
+        
         self.is_slippery = is_slippery
         
         # Define action space (up, down, left, right)
@@ -47,18 +62,47 @@ class GridWorld:
         self.current_pos = self.start_pos
         
         # Generate or set holes
-        if holes is None:
+        if holes is None or not holes:
             self.holes = self._generate_holes()
         else:
+            for pos in holes:
+                self._validate_position(pos, "hole position")
             self.holes = holes
         
         # Create map
         self.map = self._create_map()
         
+        # State encoding mapping
+        self._state_to_idx = {}
+        self._idx_to_state = {}
+        self._init_state_encoding()
+        
+    def _validate_position(self, pos: Tuple[int, int], pos_type: str) -> None:
+        """Validate a position is within grid bounds."""
+        if not (0 <= pos[0] < self.size and 0 <= pos[1] < self.size):
+            raise ValueError(f"Invalid {pos_type}: {pos} is outside grid bounds")
+            
+    def _init_state_encoding(self) -> None:
+        """Initialize state encoding mapping."""
+        idx = 0
+        for i in range(self.size):
+            for j in range(self.size):
+                self._state_to_idx[(i, j)] = idx
+                self._idx_to_state[idx] = (i, j)
+                idx += 1
+                
+    def state_to_idx(self, state: Tuple[int, int]) -> int:
+        """Convert 2D state to index."""
+        return self._state_to_idx[state]
+    
+    def idx_to_state(self, idx: int) -> Tuple[int, int]:
+        """Convert index to 2D state."""
+        return self._idx_to_state[idx]
+    
     def _generate_holes(self) -> List[Tuple[int, int]]:
         """Generate random holes, ensuring they don't overlap with start or goals."""
         holes = []
-        num_holes = self.size  # Number of holes proportional to grid size
+        num_holes = min(self.size, (self.size * self.size) // 4)  # Max 25% of grid
         
         while len(holes) < num_holes:
             pos = (random.randint(0, self.size-1), random.randint(0, self.size-1))
@@ -92,6 +136,7 @@ class GridWorld:
     def _get_slippery_action(self, intended_action: int) -> int:
         """
         Simulate slippery ice by potentially changing the intended action.
+        Matches the original FrozenLake environment behavior.
         
         Args:
             intended_action: The action the agent intended to take
@@ -135,7 +180,7 @@ class GridWorld:
         
         # Check if new position is a hole or goal
         done = False
-        reward = -0.1  # Small negative reward for each step
+        reward = -0.01  # Small negative reward for each step
         
         if new_pos in self.holes:
             done = True
@@ -143,6 +188,12 @@ class GridWorld:
         elif new_pos in self.goal_pos:
             done = True
             reward = 1.0  # Positive reward for reaching any goal
+        
+        # Add distance-based reward shaping
+        if not done:
+            min_goal_dist = min(abs(new_pos[0] - g[0]) + abs(new_pos[1] - g[1]) 
+                              for g in self.goal_pos)
+            reward += 0.01 * (self.size - min_goal_dist) / self.size
         
         info = {
             "action": action,
@@ -179,7 +230,9 @@ class GridWorld:
             'goal_pos': self.goal_pos,
             'holes': self.holes,
             'is_slippery': self.is_slippery,
-            'map': self.map
+            'map': self.map,
+            'state_to_idx': self._state_to_idx,
+            'idx_to_state': self._idx_to_state
         }
         with open(filename, 'wb') as f:
             pickle.dump(state, f)
@@ -201,4 +254,6 @@ class GridWorld:
             is_slippery=state['is_slippery']
         )
         env.map = state['map']
+        env._state_to_idx = state['state_to_idx']
+        env._idx_to_state = state['idx_to_state']
         return env 

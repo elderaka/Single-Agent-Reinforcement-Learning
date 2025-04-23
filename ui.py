@@ -9,6 +9,7 @@ import queue
 import time
 import os
 import pickle
+import json
 
 from env import GridWorld
 from agent import Agent
@@ -20,7 +21,7 @@ class ComparisonPlotWindow:
     
     def __init__(self, parent):
         self.window = tk.Toplevel(parent)
-        self.window.title("Training Comparison")
+        self.window.title("Perbandingan Training")
         self.window.geometry("1200x800")
         
         # Create figure
@@ -64,7 +65,7 @@ class ComparisonPlotWindow:
         # Plot rewards
         self.rewards_ax.plot(sarsa_rewards, label='SARSA')
         self.rewards_ax.plot(qlearning_rewards, label='Q-Learning')
-        self.rewards_ax.set_title("Rewards per Episode")
+        self.rewards_ax.set_title("Reward per Episode")
         self.rewards_ax.set_xlabel("Episode")
         self.rewards_ax.set_ylabel("Total Reward")
         self.rewards_ax.grid(True)
@@ -114,7 +115,7 @@ class FrozenLakeUI:
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Frozen Lake RL Trainer")
+        self.root.title("Single Agent Reinforcement Training - Frozen Lake Environment")
         self.root.geometry("1000x800")
         
         # Environment parameters
@@ -123,8 +124,15 @@ class FrozenLakeUI:
         self.selected_tile = tk.StringVar(value=GridWorld.FROZEN)
         self.training_method = tk.StringVar(value=METHODS[0])
         
+        # Hyperparameters
+        self.alpha = tk.DoubleVar(value=ALPHA)
+        self.gamma = tk.DoubleVar(value=GAMMA)
+        self.epsilon = tk.DoubleVar(value=EPSILON)
+        self.episodes = tk.IntVar(value=EPISODES)
+        
         # Store environment and training data
         self.env: Optional[GridWorld] = None
+        self.current_agent: Optional[Agent] = None
         self.grid_buttons: List[List[tk.Button]] = []
         self.start_pos: Optional[Tuple[int, int]] = None
         self.goal_pos: List[Tuple[int, int]] = []
@@ -150,34 +158,73 @@ class FrozenLakeUI:
         left_panel.grid(row=0, column=0, sticky="nsew")
         
         # Grid size controls
-        ttk.Label(left_panel, text="Grid Size:").grid(row=0, column=0, pady=5)
+        ttk.Label(left_panel, text="Ukuran Grid:").grid(row=0, column=0, pady=5)
         size_entry = ttk.Entry(left_panel, textvariable=self.size, width=5)
         size_entry.grid(row=0, column=1, pady=5)
-        ttk.Button(left_panel, text="Create Grid", command=self._create_grid).grid(row=0, column=2, pady=5, padx=5)
+        ttk.Button(left_panel, text="Buat Grid", command=self._create_grid).grid(row=0, column=2, pady=5, padx=5)
         
         # Tile selection
-        ttk.Label(left_panel, text="Selected Tile:").grid(row=1, column=0, pady=5)
-        tiles = [(GridWorld.FROZEN, "Frozen"), (GridWorld.HOLE, "Hole"), 
-                (GridWorld.START, "Start"), (GridWorld.GOAL, "Goal")]
+        ttk.Label(left_panel, text="Pilih Tile:").grid(row=1, column=0, pady=5)
+        tiles = [(GridWorld.FROZEN, "Es"), (GridWorld.HOLE, "Lubang"), 
+                (GridWorld.START, "Start"), (GridWorld.GOAL, "Finish")]
         for i, (tile, name) in enumerate(tiles):
             ttk.Radiobutton(left_panel, text=name, value=tile, 
                           variable=self.selected_tile).grid(row=1, column=i+1, pady=5)
         
         # Environment options
-        ttk.Checkbutton(left_panel, text="Slippery", 
+        ttk.Checkbutton(left_panel, text="Licin?", 
                        variable=self.is_slippery).grid(row=2, column=0, pady=5)
         
-        # Replace training method selection with compare button
-        ttk.Label(left_panel, text="Training:").grid(row=3, column=0, pady=5)
-        self.train_button = ttk.Button(left_panel, text="Compare Methods", 
-                                     command=self._toggle_training)
-        self.train_button.grid(row=3, column=1, columnspan=2, pady=10)
+        # Hyperparameter controls
+        hyper_frame = ttk.LabelFrame(left_panel, text="Hyperparameters", padding="5")
+        hyper_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="ew")
         
-        # Save/Load buttons
-        ttk.Button(left_panel, text="Save Environment", 
-                  command=self._save_environment).grid(row=4, column=0, pady=5)
+        # Learning Rate (Alpha)
+        ttk.Label(hyper_frame, text="Learning Rate (α):").grid(row=0, column=0, pady=2)
+        alpha_scale = ttk.Scale(hyper_frame, from_=0.01, to=1.0, variable=self.alpha, 
+                              orient="horizontal", length=150)
+        alpha_scale.grid(row=0, column=1, pady=2)
+        ttk.Label(hyper_frame, textvariable=self.alpha).grid(row=0, column=2, pady=2)
+        
+        # Discount Factor (Gamma)
+        ttk.Label(hyper_frame, text="Discount Factor (γ):").grid(row=1, column=0, pady=2)
+        gamma_scale = ttk.Scale(hyper_frame, from_=0.1, to=0.99, variable=self.gamma,
+                              orient="horizontal", length=150)
+        gamma_scale.grid(row=1, column=1, pady=2)
+        ttk.Label(hyper_frame, textvariable=self.gamma).grid(row=1, column=2, pady=2)
+        
+        # Exploration Rate (Epsilon)
+        ttk.Label(hyper_frame, text="Exploration Rate (ε):").grid(row=2, column=0, pady=2)
+        epsilon_scale = ttk.Scale(hyper_frame, from_=0.01, to=1.0, variable=self.epsilon,
+                                orient="horizontal", length=150)
+        epsilon_scale.grid(row=2, column=1, pady=2)
+        ttk.Label(hyper_frame, textvariable=self.epsilon).grid(row=2, column=2, pady=2)
+        
+        # Number of Episodes
+        ttk.Label(hyper_frame, text="Episodes:").grid(row=3, column=0, pady=2)
+        episodes_scale = ttk.Scale(hyper_frame, from_=100, to=10000, variable=self.episodes,
+                                 orient="horizontal", length=150)
+        episodes_scale.grid(row=3, column=1, pady=2)
+        ttk.Label(hyper_frame, textvariable=self.episodes).grid(row=3, column=2, pady=2)
+        
+        # Training controls
+        ttk.Label(left_panel, text="Training:").grid(row=4, column=0, pady=5)
+        self.train_button = ttk.Button(left_panel, text="Bandingkan Metode", 
+                                     command=self._toggle_training)
+        self.train_button.grid(row=4, column=1, columnspan=2, pady=10)
+        
+        # Save/Load buttons for environment
+        ttk.Button(left_panel, text="Simpan Environment", 
+                  command=self._save_environment).grid(row=5, column=0, pady=5)
         ttk.Button(left_panel, text="Load Environment", 
-                  command=self._load_environment).grid(row=4, column=1, pady=5)
+                  command=self._load_environment).grid(row=5, column=1, pady=5)
+        
+        # Save/Load buttons for Q-table
+        ttk.Label(left_panel, text="Q-Table:").grid(row=6, column=0, pady=5)
+        ttk.Button(left_panel, text="Simpan Q-Table", 
+                  command=self._save_q_table).grid(row=6, column=1, pady=5)
+        ttk.Button(left_panel, text="Load Q-Table", 
+                  command=self._load_q_table).grid(row=6, column=2, pady=5)
         
         # Grid display (middle panel)
         self.grid_frame = ttk.Frame(self.root, padding="10")
@@ -191,10 +238,10 @@ class FrozenLakeUI:
         stats_container = ttk.Frame(right_panel)
         stats_container.pack(fill=tk.X, pady=5)
         
-        self.sarsa_stats_frame = ttk.LabelFrame(stats_container, text="SARSA Statistics", padding="5")
+        self.sarsa_stats_frame = ttk.LabelFrame(stats_container, text="Statistik SARSA", padding="5")
         self.sarsa_stats_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        self.qlearning_stats_frame = ttk.LabelFrame(stats_container, text="Q-Learning Statistics", padding="5")
+        self.qlearning_stats_frame = ttk.LabelFrame(stats_container, text="Statistik Q-Learning", padding="5")
         self.qlearning_stats_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
         # Configure grid weights
@@ -217,18 +264,18 @@ class FrozenLakeUI:
         ttk.Label(stats_frame, text=f"Exploration Rate (ε): {EPSILON}").pack(anchor="w")
         
         # Training results
-        ttk.Label(stats_frame, text=f"Training Time: {training_time:.2f}s").pack(anchor="w")
-        ttk.Label(stats_frame, text=f"Success Rate: {success_rate:.2%}").pack(anchor="w")
+        ttk.Label(stats_frame, text=f"Waktu Training: {training_time:.2f}s").pack(anchor="w")
+        ttk.Label(stats_frame, text=f"Tingkat Keberhasilan: {success_rate:.2%}").pack(anchor="w")
         
         # Action counts
-        ttk.Label(stats_frame, text="Action Counts:").pack(anchor="w")
+        ttk.Label(stats_frame, text="Jumlah Aksi:").pack(anchor="w")
         for action, count in action_counts.items():
             ttk.Label(stats_frame, text=f"  {action}: {count}").pack(anchor="w")
     
     def _save_environment(self):
         """Save the current environment state."""
         if not self.env:
-            messagebox.showerror("Error", "No environment to save!")
+            messagebox.showerror("Error", "Tidak ada environment yang bisa disimpan")
             return
         
         filename = filedialog.asksaveasfilename(
@@ -237,7 +284,7 @@ class FrozenLakeUI:
         )
         if filename:
             self.env.save_state(filename)
-            messagebox.showinfo("Success", "Environment saved successfully!")
+            messagebox.showinfo("Berhasil", "Environment berhasil disimpan!")
     
     def _load_environment(self):
         """Load a saved environment state."""
@@ -248,31 +295,115 @@ class FrozenLakeUI:
             try:
                 self.env = GridWorld.load_state(filename)
                 self._update_grid_from_env()
-                messagebox.showinfo("Success", "Environment loaded successfully!")
+                messagebox.showinfo("Berhasil", "Environment berhasil diload!")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to load environment: {str(e)}")
+                messagebox.showerror("Error", f"Gagal load environment: {str(e)}")
     
-    def _save_q_table(self, policy: np.ndarray):
+    def _save_q_table(self):
         """Save the Q-table to a file."""
+        # First check if environment exists
         if not self.env:
-            messagebox.showerror("Error", "No environment to save Q-table for!")
+            messagebox.showerror("Error", "Buat environment dulu sebelum simpan Q-table!")
+            return
+            
+        # Then check if we have a trained agent
+        if not hasattr(self, 'current_agent') or self.current_agent is None:
+            messagebox.showerror("Error", "Train agent dulu sebelum simpan Q-table!")
             return
         
+        # Get file path from user
         filename = filedialog.asksaveasfilename(
-            defaultextension=".pkl",
-            filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")]
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
+        
         if filename:
             try:
-                with open(filename, 'wb') as f:
-                    pickle.dump({
-                        'policy': policy,
-                        'env_size': self.env.size,
-                        'method': self.training_method.get()
-                    }, f)
-                messagebox.showinfo("Success", "Q-table saved successfully!")
+                # Get Q-table data
+                q_table = self.current_agent.get_q_table()
+                policy = self.current_agent.get_policy(self.env.size)
+                
+                # Prepare data to save
+                data = {
+                    'q_table': q_table.tolist(),  # Convert numpy array to list
+                    'policy': policy.tolist(),
+                    'env_size': self.env.size,
+                    'method': self.training_method.get(),
+                    'alpha': ALPHA,
+                    'gamma': GAMMA,
+                    'epsilon': EPSILON
+                }
+                
+                # Save to JSON file
+                with open(filename, 'w') as f:
+                    json.dump(data, f, indent=4)
+                
+                messagebox.showinfo("Berhasil", "Q-table berhasil disimpan!")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save Q-table: {str(e)}")
+                messagebox.showerror("Error", f"Gagal simpan Q-table: {str(e)}")
+    
+    def _load_q_table(self):
+        """Load a Q-table from a file."""
+        # First check if environment exists
+        if not self.env:
+            messagebox.showerror("Error", "Buat environment dulu sebelum load Q-table!")
+            return
+        
+        # Get file path from user
+        filename = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                # Load data from JSON file
+                with open(filename, 'r') as f:
+                    data = json.load(f)
+                
+                # Check if environment size matches
+                if data['env_size'] != self.env.size:
+                    messagebox.showerror("Error", 
+                        f"Ukuran environment tidak cocok! (Loaded: {data['env_size']}, Current: {self.env.size})")
+                    return
+                
+                # Create new agent with loaded Q-table
+                self.current_agent = Agent(
+                    state_space_size=self.env.get_state_space_size(),
+                    action_space_size=self.env.get_action_space_size(),
+                    alpha=data['alpha'],
+                    gamma=data['gamma'],
+                    epsilon=data['epsilon'],
+                    method=data['method']
+                )
+                
+                # Set Q-table
+                self.current_agent.set_q_table(np.array(data['q_table']))
+                
+                # Update UI to show loaded policy
+                self._update_policy_display(np.array(data['policy']))
+                
+                messagebox.showinfo("Berhasil", "Q-table berhasil diload!")
+            except Exception as e:
+                messagebox.showerror("Error", f"Gagal load Q-table: {str(e)}")
+    
+    def _update_policy_display(self, policy: np.ndarray):
+        """Update the grid display to show the loaded policy."""
+        if not hasattr(self, 'grid_buttons') or not self.env:
+            return
+        
+        # Clear existing policy display
+        for i in range(self.env.size):
+            for j in range(self.env.size):
+                if self.env.map[i, j] not in [GridWorld.HOLE, GridWorld.GOAL]:
+                    self.grid_buttons[i][j].config(text="E")
+        
+        # Show policy arrows
+        arrows = {0: '↑', 1: '↓', 2: '←', 3: '→'}
+        for i in range(self.env.size):
+            for j in range(self.env.size):
+                if self.env.map[i, j] not in [GridWorld.HOLE, GridWorld.GOAL]:
+                    action = policy[i, j]
+                    self.grid_buttons[i][j].config(text=arrows[action])
     
     def _update_grid_from_env(self):
         """Update the grid display from the current environment."""
@@ -318,11 +449,20 @@ class FrozenLakeUI:
         for i in range(size):
             row_buttons = []
             for j in range(size):
-                btn = tk.Button(self.grid_frame, text="F", width=4, height=2,
+                btn = tk.Button(self.grid_frame, text="E", width=4, height=2,
                               command=lambda r=i, c=j: self._on_grid_click(r, c))
                 btn.grid(row=i, column=j, padx=1, pady=1)
                 row_buttons.append(btn)
             self.grid_buttons.append(row_buttons)
+        
+        # Create initial environment
+        self.env = GridWorld(
+            size=size,
+            start_pos=None,
+            goal_pos=[],
+            holes=[],
+            is_slippery=self.is_slippery.get()
+        )
     
     def _on_grid_click(self, row: int, col: int):
         """Handle grid cell clicks."""
@@ -333,7 +473,7 @@ class FrozenLakeUI:
         if tile == GridWorld.START:
             if self.start_pos:
                 old_r, old_c = self.start_pos
-                self.grid_buttons[old_r][old_c].config(text="F")
+                self.grid_buttons[old_r][old_c].config(text="E")
             self.start_pos = pos
         elif tile == GridWorld.GOAL:
             if pos in self.goal_pos:
@@ -356,14 +496,9 @@ class FrozenLakeUI:
             self.grid_buttons[row][col].config(text=GridWorld.GOAL)
         else:
             self.grid_buttons[row][col].config(text=tile)
-    
-    def _create_environment(self) -> Optional[GridWorld]:
-        """Create a GridWorld environment from the current grid state."""
-        if not self.start_pos or not self.goal_pos:
-            messagebox.showerror("Error", "Please set start and goal positions!")
-            return None
-        
-        return GridWorld(
+            
+        # Update environment
+        self.env = GridWorld(
             size=self.size.get(),
             start_pos=self.start_pos,
             goal_pos=self.goal_pos,
@@ -371,88 +506,130 @@ class FrozenLakeUI:
             is_slippery=self.is_slippery.get()
         )
     
+    def _create_environment(self) -> Optional[GridWorld]:
+        """
+        Create a new GridWorld environment based on current UI state.
+        
+        Returns:
+            Optional[GridWorld]: The created environment or None if creation fails
+        """
+        try:
+            # Get current UI state
+            size = self.size.get()
+            is_slippery = self.is_slippery.get()
+            
+            # Create environment with current state
+            env = GridWorld(
+                size=size,
+                start_pos=self.start_pos or (0, 0),  # Default to (0,0) if not set
+                goal_pos=self.goal_pos or [(size-1, size-1)],  # Default to bottom-right if not set
+                holes=self.holes or [],  # Default to empty list if not set
+                is_slippery=is_slippery
+            )
+            
+            return env
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create environment: {str(e)}")
+            return None
+    
     def _update_plot_loop(self):
         """Periodically check for new plots to display."""
         try:
-            while True:
+            # Only update if we have new data
+            if not self.plot_queue.empty():
                 data = self.plot_queue.get_nowait()
+                
+                # Only create new window if needed
                 if not self.plot_window or self.plot_window.is_closed:
                     self.plot_window = ComparisonPlotWindow(self.root)
-                self.plot_window.update_plot(*data)
+                
+                # Check if we have data for both methods
+                if 'sarsa' in data and 'qlearning' in data:
+                    self.plot_window.update_plot(data['sarsa'], data['qlearning'])
+                
                 self.plot_queue.task_done()
+                
         except queue.Empty:
             pass
         finally:
+            # Only schedule next update if training is active
             if not self.stop_training:
-                self.root.after(100, self._update_plot_loop)
+                self.root.after(500, self._update_plot_loop)  # Reduced update frequency
     
     def _train_agent(self, method: str, stats: dict, shared_data: dict):
-        """Train an agent with specified method and update shared data."""
-        env = self._create_environment()
-        if not env:
-            self.stop_training = True
+        """Train an agent using the specified method."""
+        if not self.env:
+            messagebox.showerror("Error", "Please create an environment first!")
             return
         
+        # Create agent with current hyperparameters
         agent = Agent(
-            state_space_size=env.get_state_space_size(),
-            action_space_size=env.get_action_space_size(),
-            alpha=ALPHA,
-            gamma=GAMMA,
-            epsilon=EPSILON,
+            state_space_size=self.env.get_state_space_size(),
+            action_space_size=self.env.get_action_space_size(),
+            alpha=self.alpha.get(),
+            gamma=self.gamma.get(),
+            epsilon=self.epsilon.get(),
             method=method
         )
         
         # Training loop
         rewards = []
-        success_count = 0
+        steps = []
         start_time = time.time()
+        last_plot_update = 0
+        plot_update_interval = 1.0  # Update plot every second
         
-        for episode in range(EPISODES):
+        for episode in range(self.episodes.get()):
             if self.stop_training:
                 break
                 
-            state = env.reset()
+            state = self.env.reset()
             total_reward = 0
-            done = False
+            step_count = 0
             
-            # Choose initial action
-            action = agent.choose_action(state, env.size)
-            
-            while not done and not self.stop_training:
-                next_state, reward, done, _ = env.step(action)
-                next_action = agent.choose_action(next_state, env.size)
+            while True:
+                action = agent.choose_action(state, self.env.size)
+                next_state, reward, done, _ = self.env.step(action)
                 
-                # Update Q-values
-                agent.update(state, action, reward, next_state, next_action, done, env.size)
+                if method == "sarsa":
+                    next_action = agent.choose_action(next_state, self.env.size)
+                    agent.update(state, action, reward, next_state, next_action, done, self.env.size)
+                else:  # q_learning
+                    agent.update(state, action, reward, next_state, done=done, grid_size=self.env.size)
                 
-                total_reward += reward
                 state = next_state
-                action = next_action
+                total_reward += reward
+                step_count += 1
+                
+                if done:
+                    break
             
             rewards.append(total_reward)
-            if reward > 0:  # Reached goal
-                success_count += 1
+            steps.append(step_count)
             
-            # Update shared data every 100 episodes
-            if (episode + 1) % 100 == 0:
-                shared_data[method] = (rewards.copy(), env, agent.get_policy(env.size))
-                stats['time'] = time.time() - start_time
-                stats['counts'] = agent.get_action_counts()
-                stats['rate'] = success_count / (episode + 1)
+            # Update shared data for plotting
+            current_time = time.time()
+            if current_time - last_plot_update >= plot_update_interval:
+                shared_data[method] = (rewards.copy(), self.env, agent.get_policy(self.env.size))
+                last_plot_update = current_time
                 
-                # Update stats in UI thread
-                stats_frame = (self.sarsa_stats_frame if method == 'sarsa' 
-                             else self.qlearning_stats_frame)
-                self.root.after(0, lambda: self._update_stats(
-                    stats_frame, stats['time'], stats['counts'], stats['rate']
-                ))
-                
-                # If both methods have data, update plot
-                if len(shared_data) == 2:
-                    self.plot_queue.put((
-                        shared_data['sarsa'],
-                        shared_data['qlearning']
+                # Update stats every 10 episodes
+                if episode % 10 == 0:
+                    stats['time'] = current_time - start_time
+                    stats['counts'] = agent.get_action_counts()
+                    stats['rate'] = np.mean(rewards[-100:]) if len(rewards) >= 100 else np.mean(rewards)
+                    
+                    # Update stats in UI thread
+                    stats_frame = (self.sarsa_stats_frame if method == 'sarsa' 
+                                 else self.qlearning_stats_frame)
+                    self.root.after(0, lambda: self._update_stats(
+                        stats_frame, stats['time'], stats['counts'], stats['rate']
                     ))
+                    
+                    # Update plot if we have data for both methods
+                    if 'sarsa' in shared_data and 'qlearning' in shared_data:
+                        self.plot_queue.put(shared_data.copy())
                 
                 time.sleep(0.1)  # Small delay to prevent overwhelming the queue
     
